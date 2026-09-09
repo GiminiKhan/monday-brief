@@ -56,9 +56,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEATHER_CITY: ${{ github.event.inputs.weather_city || 'Islamabad' }}
           BRIEF_TIMEZONE: ${{ github.event.inputs.timezone || 'Asia/Karachi' }}
-        run: |
-          chmod +x generate-brief.sh
-          bash generate-brief.sh
+        run: python3 generate-brief.py
 
       # ── Create backup success signal (GitHub Issue) ──────────────
       - name: Create success issue
