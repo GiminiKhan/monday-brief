@@ -1,0 +1,101 @@
+# Monday Brief — Automated Weekly Brief Generator
+#
+# Runs every Monday at 09:00 UTC on GitHub's cloud infrastructure.
+# No local machine required.
+#
+# Triggers:
+#   schedule: Weekly cron (every Monday 09:00 UTC)
+#   workflow_dispatch: Manual trigger for testing
+#
+# Tier 3 success signal:
+#   A file briefs/YYYY-MM-DD.md is committed to the repository.
+#   Verify via: gh api repos/OWNER/REPO/contents/briefs/YYYY-MM-DD.md
+
+name: Generate Monday Brief
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      weather_city:
+        description: 'City name for weather data'
+        required: false
+        default: 'Islamabad'
+      timezone:
+        description: 'Timezone (IANA format)'
+        required: false
+        default: 'Asia/Karachi'
+
+# Prevent concurrent runs (only one brief at a time)
+concurrency:
+  group: monday-brief
+  cancel-in-progress: true
+
+permissions:
+  contents: write    # Needed to commit the brief file
+  issues: write      # Optional: create issue as backup success signal
+
+jobs:
+  generate-brief:
+    name: Generate Monday Brief
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # ── Checkout repository ───────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── Run the brief generator ──────────────────────────────────
+      - name: Generate brief
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEATHER_CITY: ${{ github.event.inputs.weather_city || 'Islamabad' }}
+          BRIEF_TIMEZONE: ${{ github.event.inputs.timezone || 'Asia/Karachi' }}
+        run: |
+          chmod +x generate-brief.sh
+          bash generate-brief.sh
+
+      # ── Create backup success signal (GitHub Issue) ──────────────
+      - name: Create success issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TODAY=$(date -u '+%Y-%m-%d')
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          gh issue create \
+            --title "✅ Brief generated: ${TODAY}" \
+            --body "## Monday Brief — ${TODAY}
+
+          **Status**: SUCCESS
+          **Workflow run**: [${{ github.run_id }}](${RUN_URL})
+          **File**: \`briefs/${TODAY}.md\`
+          **Generated at**: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          This issue serves as a secondary Tier 3 success signal.
+          The primary signal is the committed brief file." \
+            --label "automated,brief" 2>/dev/null || {
+              echo "Note: Could not create backup issue (non-critical)"
+            }
+
+      # ── Summary ───────────────────────────────────────────────────
+      - name: Print summary
+        if: always()
+        run: |
+          TODAY=$(date -u '+%Y-%m-%d')
+          echo "### Monday Brief Generation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Date | ${TODAY} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Brief file | \`briefs/${TODAY}.md\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tier 3 signal**: File committed to repository at \`briefs/${TODAY}.md\`" >> $GITHUB_STEP_SUMMARY
